@@ -4,6 +4,7 @@ import io
 import psycopg2
 from psycopg2 import sql
 from time import time
+from datetime import datetime, timezone
 
 # Datenbank-Verbindungsdetails
 DB_DETAILS = {
@@ -175,6 +176,16 @@ def insert_measurement_data(cur, sensor, df):
         )
 
 
+# Funktion zum Abrufen des letzten Messdatums eines Sensors
+def get_last_measurement_date(cur, sensor_id):
+    query = """
+    SELECT MAX(created_at) FROM measurement WHERE sensor_id = %s;
+    """
+    cur.execute(query, (sensor_id,))
+    result = cur.fetchone()
+    return result[0] if result[0] else None
+
+
 # Hauptprogramm
 def main():
     # Sensebox URL
@@ -188,34 +199,59 @@ def main():
     conn.autocommit = True
     cur = conn.cursor()
 
-    # Tabellen erstellen, falls sie nicht existieren
-    create_tables(cur)
+    # Prüfen, ob die Datenbank bereits existiert
+    cur.execute("SELECT to_regclass('public.sensebox')")
+    db_exists = cur.fetchone()[0] is not None
 
-    # Abrufen der Sensebox-Daten
-    response = requests.get(sensebox_url)
-    sensebox = response.json()
+    if not db_exists:
+        # Tabellen erstellen, falls sie nicht existieren
+        create_tables(cur)
 
-    # Sensebox-Daten einfügen
-    insert_sensebox_data(cur, sensebox)
+        # Abrufen der Sensebox-Daten
+        response = requests.get(sensebox_url)
+        sensebox = response.json()
 
-    # Sensor-Daten einfügen
-    insert_sensor_data(cur, sensebox)
+        # Sensebox-Daten einfügen
+        insert_sensebox_data(cur, sensebox)
 
-    print(
-        f"Sensebox Informationen für '{sensebox['name']}' wurden erfolgreich in die Datenbank eingefügt.\n"
+        # Sensor-Daten einfügen
+        insert_sensor_data(cur, sensebox)
+
+        print(
+            f"Sensebox Informationen für '{sensebox['name']}' wurden erfolgreich in die Datenbank eingefügt."
+        )
+
+        # Sensordaten abrufen und in die Datenbank einfügen
+        start_date = "2024-06-01T00:00:00.000Z"
+    else:
+        start_date = None
+
+    # Aktuelles Datum und Uhrzeit in ISO 8601 Format mit Zulu-Zeit
+    end_date = (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
     )
 
-    # Sensordaten abrufen und in die Datenbank einfügen
-    start_date = "2024-01-01T00:00:00.000Z"
-    end_date = "2024-06-20T00:00:00.000Z"
-    sensor_titles_and_ids = get_sensor_titles_and_ids(sensebox["_id"])
+    sensor_titles_and_ids = get_sensor_titles_and_ids("6252afcfd7e732001bb6b9f7")
 
     print(f"Sensor Informationen werden abgerufen..")
 
     for sensor in sensor_titles_and_ids:
-        timestart = time()
+        if db_exists:
+            start_date = get_last_measurement_date(cur, sensor.get("id"))
+            if not start_date:
+                start_date = "2024-06-01T00:00:00.000Z"
+            else:
+                # Konvertiere start_date ins gewünschte Format
+                start_date = (
+                    start_date.replace(tzinfo=timezone.utc)
+                    .isoformat(timespec="milliseconds")
+                    .replace("+00:00", "Z")
+                )
+
         csv_data = fetch_sensor_data(
-            sensebox["_id"], sensor.get("title"), start_date, end_date
+            "6252afcfd7e732001bb6b9f7", sensor.get("title"), start_date, end_date
         )
         if csv_data:
             df = pd.read_csv(io.StringIO(csv_data), usecols=["value", "createdAt"])
@@ -223,17 +259,15 @@ def main():
             df["createdAt"] = pd.to_datetime(df["createdAt"])
             df["createdAt"] = pd.to_datetime(df.createdAt).dt.tz_localize(None)
             df["createdAt"] = df["createdAt"].dt.floor("min")
-            timeend = time()
-            print(f"Download Zeit: {timeend - timestart} Sekunden.")
+            df.sort_values("createdAt", inplace=True)
             insert_measurement_data(cur, sensor, df)
             print(
-                f"Daten für Sensor '{sensor.get('title')}' wurden erfolgreich in die Datenbank eingefügt."
+                f"Alle Daten ab dem {start_date.replace('T', ' ').split('.')[0]} für Sensor {sensor.get('title')} wurden erfolgreich in die Datenbank eingefügt."
             )
 
     # Verbindung schließen
     cur.close()
     conn.close()
-    print(f"\nProjekt wurde initialisiert.")
 
 
 if __name__ == "__main__":
