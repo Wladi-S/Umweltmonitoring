@@ -176,6 +176,22 @@ def insert_measurement_data(cur, sensor, df):
         )
 
 
+def update_last_measurement_at(cur):
+    update_query = """
+    UPDATE sensebox
+    SET last_measurement_at = subquery.last_measurement_at
+    FROM (
+        SELECT s.sensebox_id, MAX(m.created_at) AS last_measurement_at
+        FROM sensor s
+        JOIN measurement m ON s.sensor_id = m.sensor_id
+        GROUP BY s.sensebox_id
+    ) AS subquery
+    WHERE sensebox.sensebox_id = subquery.sensebox_id;
+    """
+    cur.execute(update_query)
+    print("Last measurement dates updated.")
+
+
 # Funktion zum Abrufen des letzten Messdatums eines Sensors
 def get_last_measurement_date(cur, sensor_id):
     query = """
@@ -264,7 +280,8 @@ def main():
             print(
                 f"Alle Daten ab dem {start_date.replace('T', ' ').split('.')[0]} für Sensor {sensor.get('title')} wurden erfolgreich in die Datenbank eingefügt."
             )
-
+    # Aktualisiere das letzte Messdatum in der Tabelle sensebox
+    update_last_measurement_at(cur)
     # Verbindung schließen
     cur.close()
     conn.close()
