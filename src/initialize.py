@@ -273,7 +273,9 @@ def main():
             df = pd.read_csv(io.StringIO(csv_data), usecols=["value", "createdAt"])
             df = df.rename(columns={"value": sensor.get("title")})
             df["createdAt"] = pd.to_datetime(df["createdAt"])
-            df["createdAt"] = pd.to_datetime(df.createdAt).dt.tz_localize(None)
+            df["createdAt"] = pd.to_datetime(df.createdAt).dt.tz_convert(
+                "Europe/Berlin"
+            )
             df["createdAt"] = df["createdAt"].dt.floor("min")
             df.sort_values("createdAt", inplace=True)
             insert_measurement_data(cur, sensor, df)
