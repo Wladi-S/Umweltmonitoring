@@ -7,8 +7,11 @@ import os
 from fetch import (
     fetch_and_pivot_sensor_data,
     fetch_sensebox_info,
-)  # Import the new function
+)
 from datetime import datetime, timedelta
+from astral import LocationInfo
+from astral.sun import sun
+import pytz  # To handle timezones
 
 # Set the path to the SVG icons directory relative to the app.py location
 SVG_DIR = os.path.join("..", "svg")
@@ -26,6 +29,19 @@ sensebox_info = fetch_sensebox_info().iloc[0]  # Assuming there's only one sense
 
 lon = sensebox_info["longitude"]
 lat = sensebox_info["latitude"]
+
+# Calculate sunrise and sunset times with timezone adjustment
+city = LocationInfo(
+    name="Karlsruhe",
+    region="Germany",
+    timezone="Europe/Berlin",
+    latitude=lat,
+    longitude=lon,
+)
+timezone = pytz.timezone(city.timezone)  # Get the timezone of the location
+s = sun(city.observer, date=datetime.now(), tzinfo=timezone)
+sunrise_time = s["sunrise"].strftime("%H:%M")
+sunset_time = s["sunset"].strftime("%H:%M")
 
 
 def get_last_valid_value(df, column):
@@ -87,6 +103,62 @@ def create_sensor_card(title, value, icon_filename):
 
 
 def create_sensebox_info_card(info):
+    sunrise_icon = os.path.join(SVG_DIR, "wi-sunrise.svg")
+    sunset_icon = os.path.join(SVG_DIR, "wi-sunset.svg")
+
+    encoded_sunrise_icon = base64.b64encode(open(sunrise_icon, "rb").read()).decode(
+        "ascii"
+    )
+    encoded_sunset_icon = base64.b64encode(open(sunset_icon, "rb").read()).decode(
+        "ascii"
+    )
+
+    sunrise_card = dbc.Col(
+        dbc.Card(
+            dbc.CardBody(
+                [
+                    html.Img(
+                        src="data:image/svg+xml;base64,{}".format(encoded_sunrise_icon),
+                        style={"height": "60px", "width": "60px"},
+                    ),
+                    html.Span(
+                        sunrise_time,
+                        className="card-value",
+                        style={
+                            "display": "block",
+                            "fontSize": "24px",
+                            "fontWeight": "bold",
+                        },
+                    ),
+                ],
+                style={"textAlign": "center"},
+            )
+        )
+    )
+
+    sunset_card = dbc.Col(
+        dbc.Card(
+            dbc.CardBody(
+                [
+                    html.Img(
+                        src="data:image/svg+xml;base64,{}".format(encoded_sunset_icon),
+                        style={"height": "60px", "width": "60px"},
+                    ),
+                    html.Span(
+                        sunset_time,
+                        className="card-value",
+                        style={
+                            "display": "block",
+                            "fontSize": "24px",
+                            "fontWeight": "bold",
+                        },
+                    ),
+                ],
+                style={"textAlign": "center"},
+            ),
+        )
+    )
+
     return dbc.Card(
         dbc.CardBody(
             [
@@ -219,6 +291,7 @@ def create_sensebox_info_card(info):
                         "alignItems": "center",
                     },
                 ),
+                dbc.Row([sunrise_card, sunset_card], style={"marginTop": "20px"}),
             ],
         ),
         className="mb-3",
@@ -227,7 +300,7 @@ def create_sensebox_info_card(info):
 
 def calculate_daily_stats(df):
     stats = []
-    for i in range(7):
+    for i in range(8):
         day = datetime.now() - timedelta(days=i)
         day_str = day.strftime("%Y-%m-%d")
         day_data = df[df["created_at"].dt.strftime("%Y-%m-%d") == day_str]
@@ -271,11 +344,11 @@ def create_daily_stats_card(stats):
                 html.P(stats["date"], className="card-date", style={"margin": "0"}),
                 html.Img(
                     src="data:image/svg+xml;base64,{}".format(encoded_image),
-                    style={"height": "60px", "width": "60px"},
+                    style={"height": "60px", "width": "60px", "margin": "9px"},
                 ),
                 html.P(
                     f"{stats['max_temp']:.2f} °C",
-                    style={"fontSize": "20px", "fontWeight": "bold", "margin": "0"},
+                    style={"fontSize": "24px", "fontWeight": "bold", "margin": "0"},
                 ),
                 html.P(f"{stats['min_temp']:.2f} °C", style={"margin": "0"}),
                 html.P(f"{stats['sum_rain']:.2f} mm", style={"margin": "0"}),
@@ -289,9 +362,7 @@ def create_daily_stats_card(stats):
 def create_daily_stats_row(df):
     daily_stats = calculate_daily_stats(df)
     return dbc.Row(
-        children=[
-            dbc.Col(create_daily_stats_card(stats), width=2) for stats in daily_stats
-        ]
+        children=[dbc.Col(create_daily_stats_card(stats)) for stats in daily_stats]
     )
 
 
@@ -367,6 +438,7 @@ def create_main_content(df):
             ],
             style={
                 "padding": "15px",
+                "padding-bottom": "0px",
             },
         ),
         className="mb-3",
