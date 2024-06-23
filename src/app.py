@@ -101,6 +101,10 @@ def create_sensor_card(title, value, icon_filename):
             ],
         ),
         className="mb-3",
+        style={
+            "background-color": "#eff1f9",
+            "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
+        },
     )
 
 
@@ -133,8 +137,14 @@ def create_sensebox_info_card(info):
                         },
                     ),
                 ],
-                style={"textAlign": "center"},
-            )
+                style={
+                    "textAlign": "center",
+                },
+            ),
+            style={
+                "background-color": "#eff1f9",
+                "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
+            },
         )
     )
 
@@ -158,6 +168,10 @@ def create_sensebox_info_card(info):
                 ],
                 style={"textAlign": "center"},
             ),
+            style={
+                "background-color": "#eff1f9",
+                "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
+            },
         )
     )
 
@@ -297,12 +311,16 @@ def create_sensebox_info_card(info):
             ],
         ),
         className="mb-3",
+        style={
+            "background-color": "#e7e9f5",
+            "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
+        },
     )
 
 
 def calculate_daily_stats(df):
     stats = []
-    for i in range(5):
+    for i in range(6):
         day = datetime.now() - timedelta(days=i)
         day_str = day.strftime("%Y-%m-%d")
         day_data = df[df["created_at"].dt.strftime("%Y-%m-%d") == day_str]
@@ -358,13 +376,17 @@ def create_daily_stats_card(stats):
             style={"textAlign": "center"},
         ),
         className="mb-3",
+        style={
+            "background-color": "#eff1f9",
+            "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
+        },
     )
 
 
 def create_daily_stats_row(df):
     daily_stats = calculate_daily_stats(df)
     return dbc.Row(
-        children=[dbc.Col(create_daily_stats_card(stats)) for stats in daily_stats]
+        children=[dbc.Col(create_daily_stats_card(stats)) for stats in daily_stats],
     )
 
 
@@ -444,6 +466,10 @@ def create_main_content(df):
             },
         ),
         className="mb-3",
+        style={
+            "background-color": "#e7e9f5",
+            "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
+        },
     )
 
 
@@ -470,6 +496,7 @@ app.layout = html.Div(
         "padding": "5%",
         "display": "flex",
         "justifyContent": "center",
+        "background-color": "#f5f5f5",
     },
     children=[
         html.Div(
@@ -518,12 +545,19 @@ app.layout = html.Div(
                                         width=4,
                                     ),
                                 ],
-                                style={"width": "50%", "margin": "20px auto"},
+                                style={
+                                    "width": "50%",
+                                    "margin": "20px auto",
+                                },
                             ),
                             dbc.Row(dbc.Col(dcc.Graph(id="line-plot"))),
                         ]
                     ),
                     className="mb-3",
+                    style={
+                        "background-color": "#e7e9f5",
+                        "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
+                    },
                 ),
             ],
         ),
@@ -540,6 +574,8 @@ def update_line_plot(sensor, aggregation):
     if sensor is None or aggregation is None:
         return px.line(
             title="Wählen Sie den Sensor und die Aggregation aus, um Daten zu visualisieren."
+        ).update_layout(
+            paper_bgcolor="#e7e9f5",
         )
 
     if aggregation == "H":
@@ -565,6 +601,8 @@ def update_line_plot(sensor, aggregation):
         x="created_at",
         y=df_agg.columns[1:],
         title=f"{sensor} über die Zeit ({aggregation})",
+    ).update_layout(
+        paper_bgcolor="#e7e9f5",
     )
 
     return fig
