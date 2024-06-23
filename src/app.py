@@ -1,9 +1,11 @@
 import dash
 from dash import dcc, html
 import dash_bootstrap_components as dbc
+from dash.dependencies import Input, Output
 import pandas as pd
 import base64
 import os
+import plotly.express as px
 from fetch import (
     fetch_and_pivot_sensor_data,
     fetch_sensebox_info,
@@ -300,7 +302,7 @@ def create_sensebox_info_card(info):
 
 def calculate_daily_stats(df):
     stats = []
-    for i in range(8):
+    for i in range(5):
         day = datetime.now() - timedelta(days=i)
         day_str = day.strftime("%Y-%m-%d")
         day_data = df[df["created_at"].dt.strftime("%Y-%m-%d") == day_str]
@@ -389,7 +391,7 @@ def create_main_content(df):
                         ),
                         dbc.Col(
                             create_sensor_card(
-                                "Wind Geschwindigkeit",
+                                "Windgeschwindigkeit",
                                 f"{get_last_valid_value(df, 'Windspeed in m/s'):.2f} m/s",
                                 "wi-strong-wind.svg",
                             ),
@@ -416,7 +418,7 @@ def create_main_content(df):
                             create_sensor_card(
                                 "Regen (1h)",
                                 f"{get_last_valid_value(df, 'Rain (1h) in mm'):.2f} mm",
-                                "wi-raindrop.svg",
+                                "wi-umbrella.svg",
                             ),
                         ),
                         dbc.Col(
@@ -445,6 +447,24 @@ def create_main_content(df):
     )
 
 
+# Create dropdown options for sensors
+sensor_options = [
+    {"label": "Temperatur", "value": "Temperature in °C"},
+    {"label": "Luftfeuchtigkeit", "value": "Humidity in %"},
+    {"label": "Windgeschwindigkeit", "value": "Windspeed in m/s"},
+    {"label": "Luftdruck", "value": "Pressure in hPa"},
+    {"label": "Regen", "value": "Rain (1h) in mm"},
+    {"label": "UV-A Strahlung", "value": "UV-A Radiation in W/m2"},
+    {"label": "UV-B Strahlung", "value": "UV-B Radiation in W/m2"},
+]
+
+# Create dropdown options for aggregation methods
+aggregation_options = [
+    {"label": "Stündlich", "value": "H"},
+    {"label": "Täglich", "value": "D"},
+    {"label": "Wöchentlich", "value": "W"},
+]
+
 app.layout = html.Div(
     style={
         "padding": "5%",
@@ -471,10 +491,84 @@ app.layout = html.Div(
                         ),
                     ],
                 ),
+                dbc.Card(
+                    dbc.CardBody(
+                        [
+                            dbc.Row(
+                                justify="center",
+                                children=[
+                                    dbc.Col(
+                                        dcc.Dropdown(
+                                            id="sensor-dropdown",
+                                            options=sensor_options,
+                                            placeholder="wähle Sensor",
+                                            clearable=False,
+                                            style={"width": "100%"},
+                                        ),
+                                        width=4,
+                                    ),
+                                    dbc.Col(
+                                        dcc.Dropdown(
+                                            id="aggregation-dropdown",
+                                            options=aggregation_options,
+                                            placeholder="wähle Aggregation",
+                                            clearable=False,
+                                            style={"width": "100%"},
+                                        ),
+                                        width=4,
+                                    ),
+                                ],
+                                style={"width": "50%", "margin": "20px auto"},
+                            ),
+                            dbc.Row(dbc.Col(dcc.Graph(id="line-plot"))),
+                        ]
+                    ),
+                    className="mb-3",
+                ),
             ],
         ),
     ],
 )
+
+
+@app.callback(
+    Output("line-plot", "figure"),
+    Input("sensor-dropdown", "value"),
+    Input("aggregation-dropdown", "value"),
+)
+def update_line_plot(sensor, aggregation):
+    if sensor is None or aggregation is None:
+        return px.line(
+            title="Wählen Sie den Sensor und die Aggregation aus, um Daten zu visualisieren."
+        )
+
+    if aggregation == "H":
+        df_resampled = df.resample("h", on="created_at")
+    elif aggregation == "D":
+        df_resampled = df.resample("D", on="created_at")
+    else:
+        df_resampled = df.resample("W", on="created_at")
+
+    if sensor in ["Temperature in °C", "Humidity in %", "Pressure in hPa"]:
+        df_agg = df_resampled.agg({sensor: ["min", "mean", "max"]})
+    elif sensor == "Rain (1h) in mm":
+        df_agg = df_resampled.agg({sensor: "sum"})
+    else:
+        df_agg = df_resampled.agg({sensor: ["mean", "max"]})
+
+    # Flatten column names
+    df_agg.columns = ["_".join(col).strip() for col in df_agg.columns.values]
+    df_agg.reset_index(inplace=True)
+
+    fig = px.line(
+        df_agg,
+        x="created_at",
+        y=df_agg.columns[1:],
+        title=f"{sensor} über die Zeit ({aggregation})",
+    )
+
+    return fig
+
 
 if __name__ == "__main__":
     app.run_server(debug=True)
