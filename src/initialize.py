@@ -202,6 +202,64 @@ def get_last_measurement_date(cur, sensor_id):
     return result[0] if result[0] else None
 
 
+# Funktion zum Aktualisieren der Datenbank mit neuen Sensordaten
+def update_data():
+    # Verbindung zur spezifischen Datenbank herstellen
+    conn = get_db_connection(DB_DETAILS["dbname"])
+    conn.autocommit = True
+    cur = conn.cursor()
+
+    # Aktuelles Datum und Uhrzeit in ISO 8601 Format mit Zulu-Zeit
+    end_date = (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+    sensor_titles_and_ids = get_sensor_titles_and_ids("6252afcfd7e732001bb6b9f7")
+
+    print(f"Sensor Informationen werden abgerufen..")
+
+    for sensor in sensor_titles_and_ids:
+        start_date = get_last_measurement_date(cur, sensor.get("id"))
+        if not start_date:
+            start_date = "2022-01-01T00:00:00.000Z"
+        else:
+            # Konvertiere start_date ins gewünschte Format
+            start_date = (
+                start_date.replace(tzinfo=timezone.utc)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
+            )
+
+        csv_data = fetch_sensor_data(
+            "6252afcfd7e732001bb6b9f7", sensor.get("title"), start_date, end_date
+        )
+        if csv_data:
+            df = pd.read_csv(io.StringIO(csv_data), usecols=["value", "createdAt"])
+            df = df.rename(columns={"value": sensor.get("title")})
+            df["createdAt"] = pd.to_datetime(df["createdAt"])
+            if df["createdAt"].dt.tz is None:
+                df["createdAt"] = df["createdAt"].dt.tz_localize("UTC", ambiguous="NaT")
+            df["createdAt"] = df["createdAt"].dt.tz_convert("Europe/Berlin")
+            df["createdAt"] = (
+                df["createdAt"]
+                .dt.tz_localize(None)
+                .dt.tz_localize("Europe/Berlin", ambiguous="NaT")
+            )
+            df = df.dropna(subset=["createdAt"])
+            df["createdAt"] = df["createdAt"].dt.floor("min")
+            df.sort_values("createdAt", inplace=True)
+
+            insert_measurement_data(cur, sensor, df)
+            print(
+                f"Alle Daten ab dem {start_date.replace('T', ' ').split('.')[0]} für Sensor {sensor.get('title')} wurden erfolgreich in die Datenbank eingefügt."
+            )
+    update_last_measurement_at(cur)
+    cur.close()
+    conn.close()
+
+
 # Hauptprogramm
 def main():
     # Sensebox URL
@@ -237,71 +295,9 @@ def main():
             f"Sensebox Informationen für '{sensebox['name']}' wurden erfolgreich in die Datenbank eingefügt."
         )
 
-        # Sensordaten abrufen und in die Datenbank einfügen
-        start_date = "2022-01-01T00:00:00.000Z"
-    else:
-        start_date = None
+    # Aktualisieren Sie die Datenbank mit neuen Sensordaten
+    update_data()
 
-    # Aktuelles Datum und Uhrzeit in ISO 8601 Format mit Zulu-Zeit
-    end_date = (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="milliseconds")
-        .replace("+00:00", "Z")
-    )
-
-    sensor_titles_and_ids = get_sensor_titles_and_ids("6252afcfd7e732001bb6b9f7")
-
-    print(f"Sensor Informationen werden abgerufen..")
-
-    for sensor in sensor_titles_and_ids:
-        if db_exists:
-            start_date = get_last_measurement_date(cur, sensor.get("id"))
-            if not start_date:
-                start_date = "2022-01-01T00:00:00.000Z"
-            else:
-                # Konvertiere start_date ins gewünschte Format
-                start_date = (
-                    start_date.replace(tzinfo=timezone.utc)
-                    .isoformat(timespec="milliseconds")
-                    .replace("+00:00", "Z")
-                )
-
-        csv_data = fetch_sensor_data(
-            "6252afcfd7e732001bb6b9f7", sensor.get("title"), start_date, end_date
-        )
-        if csv_data:
-            df = pd.read_csv(io.StringIO(csv_data), usecols=["value", "createdAt"])
-            df = df.rename(columns={"value": sensor.get("title")})
-            df["createdAt"] = pd.to_datetime(df["createdAt"])
-            # Lokalisiere zuerst in UTC, falls nicht bereits lokalisiert. Behandle Mehrdeutigkeiten, falls vorhanden.
-            if df["createdAt"].dt.tz is None:
-                df["createdAt"] = df["createdAt"].dt.tz_localize("UTC", ambiguous="NaT")
-
-            # Konvertiere in die gewünschte Zeitzone ohne den 'ambiguous' Parameter
-            df["createdAt"] = df["createdAt"].dt.tz_convert("Europe/Berlin")
-
-            # Behandle Mehrdeutigkeiten vor dem Runden
-            # Hier könnte eine spezifischere Logik erforderlich sein, abhängig von den Daten
-            df["createdAt"] = (
-                df["createdAt"]
-                .dt.tz_localize(None)
-                .dt.tz_localize("Europe/Berlin", ambiguous="NaT")
-            )
-
-            # Entferne Zeilen mit 'NaT' in 'createdAt'
-            df = df.dropna(subset=["createdAt"])
-
-            # Runde die Zeitwerte ab und sortiere sie
-            df["createdAt"] = df["createdAt"].dt.floor("min")
-            df.sort_values("createdAt", inplace=True)
-
-            # Füge die bereinigten Daten in die Datenbank ein
-            insert_measurement_data(cur, sensor, df)
-            print(
-                f"Alle Daten ab dem {start_date.replace('T', ' ').split('.')[0]} für Sensor {sensor.get('title')} wurden erfolgreich in die Datenbank eingefügt."
-            )
-    # Aktualisiere das letzte Messdatum in der Tabelle sensebox
-    update_last_measurement_at(cur)
     # Verbindung schließen
     cur.close()
     conn.close()
