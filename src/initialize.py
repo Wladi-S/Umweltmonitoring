@@ -238,7 +238,7 @@ def main():
         )
 
         # Sensordaten abrufen und in die Datenbank einfügen
-        start_date = "2024-06-01T00:00:00.000Z"
+        start_date = "2022-01-01T00:00:00.000Z"
     else:
         start_date = None
 
@@ -257,7 +257,7 @@ def main():
         if db_exists:
             start_date = get_last_measurement_date(cur, sensor.get("id"))
             if not start_date:
-                start_date = "2024-06-01T00:00:00.000Z"
+                start_date = "2022-01-01T00:00:00.000Z"
             else:
                 # Konvertiere start_date ins gewünschte Format
                 start_date = (
@@ -273,11 +273,29 @@ def main():
             df = pd.read_csv(io.StringIO(csv_data), usecols=["value", "createdAt"])
             df = df.rename(columns={"value": sensor.get("title")})
             df["createdAt"] = pd.to_datetime(df["createdAt"])
-            df["createdAt"] = pd.to_datetime(df.createdAt).dt.tz_convert(
-                "Europe/Berlin"
+            # Lokalisiere zuerst in UTC, falls nicht bereits lokalisiert. Behandle Mehrdeutigkeiten, falls vorhanden.
+            if df["createdAt"].dt.tz is None:
+                df["createdAt"] = df["createdAt"].dt.tz_localize("UTC", ambiguous="NaT")
+
+            # Konvertiere in die gewünschte Zeitzone ohne den 'ambiguous' Parameter
+            df["createdAt"] = df["createdAt"].dt.tz_convert("Europe/Berlin")
+
+            # Behandle Mehrdeutigkeiten vor dem Runden
+            # Hier könnte eine spezifischere Logik erforderlich sein, abhängig von den Daten
+            df["createdAt"] = (
+                df["createdAt"]
+                .dt.tz_localize(None)
+                .dt.tz_localize("Europe/Berlin", ambiguous="NaT")
             )
+
+            # Entferne Zeilen mit 'NaT' in 'createdAt'
+            df = df.dropna(subset=["createdAt"])
+
+            # Runde die Zeitwerte ab und sortiere sie
             df["createdAt"] = df["createdAt"].dt.floor("min")
             df.sort_values("createdAt", inplace=True)
+
+            # Füge die bereinigten Daten in die Datenbank ein
             insert_measurement_data(cur, sensor, df)
             print(
                 f"Alle Daten ab dem {start_date.replace('T', ' ').split('.')[0]} für Sensor {sensor.get('title')} wurden erfolgreich in die Datenbank eingefügt."
