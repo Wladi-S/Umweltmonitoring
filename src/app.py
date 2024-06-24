@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from astral import LocationInfo
 from astral.sun import sun
 import pytz
+from neuralprophet import NeuralProphet
+import shutil
 
 # Set the path to the SVG icons directory relative to the app.py location
 SVG_DIR = os.path.join("..", "svg")
@@ -175,9 +177,7 @@ def create_sensebox_info_card(info):
     return dbc.Card(
         dbc.CardBody(
             [
-                html.H2(
-                    info["name"], className="card-title", style={"color": "#50ae48"}
-                ),
+                html.H2(info["name"], className="card-title"),
                 html.Div(
                     [
                         html.Div(
@@ -492,6 +492,97 @@ aggregation_options = [
 map_icon_path = os.path.join(SVG_DIR, "map.svg")
 encoded_map_icon = base64.b64encode(open(map_icon_path, "rb").read()).decode("ascii")
 
+
+# Train NeuralProphet model and make predictions
+def train_and_predict(df):
+    hourly_forecast = df[["created_at", "Temperature in °C"]].dropna()
+    hourly_forecast.set_index("created_at", inplace=True)
+    hourly_forecast["Temperature in °C"] = hourly_forecast["Temperature in °C"].astype(
+        float
+    )
+    hourly_forecast = hourly_forecast.resample("h").max().dropna()
+    hourly_forecast.reset_index(inplace=True)
+    hourly_forecast.columns = ["ds", "y"]
+    hourly_forecast = hourly_forecast[:-1]
+
+    m = NeuralProphet()
+    model = m.fit(hourly_forecast, freq="h", epochs=10)
+
+    future = m.make_future_dataframe(hourly_forecast, periods=5)
+    forecast = m.predict(future)
+
+    # Lösche den Ordner 'lightning_logs'
+    shutil.rmtree("lightning_logs", ignore_errors=True)
+
+    forecast = forecast[["ds", "yhat1"]]
+    forecast.columns = ["ds", "y"]
+    return pd.concat([hourly_forecast[-3:], forecast])
+
+
+forecast_df = train_and_predict(df)
+
+
+def create_forecast_card(time, value, icon_filename):
+    icon_path = os.path.join(SVG_DIR, icon_filename)
+    encoded_image = base64.b64encode(open(icon_path, "rb").read()).decode("ascii")
+    return dbc.Card(
+        dbc.CardBody(
+            [
+                html.Span(
+                    time,
+                    className="card-title",
+                    style={
+                        "display": "block",
+                        "fontSize": "24px",
+                        "marginBottom": "4px",
+                    },
+                ),
+                html.Img(
+                    src="data:image/svg+xml;base64,{}".format(encoded_image),
+                    className="card-icon",
+                    style={"height": "60px", "width": "60px"},
+                ),
+                html.Span(
+                    f"{value:.2f} °C",
+                    className="card-value",
+                    style={
+                        "display": "block",
+                        "fontSize": "24px",
+                        "fontWeight": "bold",
+                    },
+                ),
+            ],
+            style={"textAlign": "center"},
+        ),
+        className="mb-3",
+        style={
+            "background-color": "#eff1f9",
+            "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
+        },
+    )
+
+
+def create_forecast_row(forecast_df):
+    forecast_cards = []
+    for i in range(len(forecast_df)):
+        if forecast_df.iloc[i]["y"] > forecast_df.iloc[i - 1]["y"]:
+            icon_filename = "thermometer-warmer.svg"
+        elif forecast_df.iloc[i]["y"] < forecast_df.iloc[i - 1]["y"]:
+            icon_filename = "thermometer-colder.svg"
+        else:
+            icon_filename = "thermometer-celsius.svg"
+        forecast_cards.append(
+            dbc.Col(
+                create_forecast_card(
+                    forecast_df.iloc[i]["ds"].strftime("%H:%M"),
+                    round(forecast_df.iloc[i]["y"], 1),
+                    icon_filename,
+                )
+            )
+        )
+    return dbc.Row(forecast_cards)
+
+
 app.layout = html.Div(
     style={
         "padding": "5%",
@@ -553,6 +644,27 @@ app.layout = html.Div(
                             width=9,  # 3/4 of the row
                         ),
                     ],
+                ),
+                dbc.Card(
+                    dbc.CardBody(
+                        [
+                            html.H3(
+                                "Heutige Vorhersage",
+                                style={
+                                    "textAlign": "left",
+                                    "marginTop": "0px",
+                                    "margin-bottom": "20px",
+                                },
+                            ),
+                            create_forecast_row(forecast_df),
+                            dbc.Row(dbc.Col(dcc.Graph(id="forecast-line-plot"))),
+                        ],
+                    ),
+                    className="mb-3",
+                    style={
+                        "background-color": "#e7e9f5",
+                        "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
+                    },
                 ),
                 dbc.Card(
                     dbc.CardBody(
@@ -665,6 +777,22 @@ def update_line_plot(sensor, aggregation):
     ).update_layout(
         paper_bgcolor="#e7e9f5",
     )
+
+    return fig
+
+
+@app.callback(Output("forecast-line-plot", "figure"), Input("forecast-line-plot", "id"))
+def update_forecast_line_plot(_):
+    fig = px.line(
+        forecast_df, x="ds", y="y", title="Temperatur Vorhersage (nächste 6 Stunden)"
+    ).update_layout(
+        paper_bgcolor="#e7e9f5",
+        plot_bgcolor="#e7e9f5",
+        xaxis_title="Datum",
+        yaxis_title="Temperatur",
+    )
+
+    fig.update_traces(line=dict(color="#50ae48"))
 
     return fig
 
