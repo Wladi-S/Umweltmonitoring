@@ -1,19 +1,16 @@
 import dash
 from dash import dcc, html
 import dash_bootstrap_components as dbc
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 import pandas as pd
 import base64
 import os
 import plotly.express as px
-from fetch import (
-    fetch_and_pivot_sensor_data,
-    fetch_sensebox_info,
-)
+from fetch import fetch_and_pivot_sensor_data, fetch_sensebox_info
 from datetime import datetime, timedelta
 from astral import LocationInfo
 from astral.sun import sun
-import pytz  # To handle timezones
+import pytz
 
 # Set the path to the SVG icons directory relative to the app.py location
 SVG_DIR = os.path.join("..", "svg")
@@ -29,8 +26,8 @@ def fetch_and_prepare_data():
 df = fetch_and_prepare_data()
 sensebox_info = fetch_sensebox_info().iloc[0]  # Assuming there's only one sensebox
 
-lon = sensebox_info["longitude"]
-lat = sensebox_info["latitude"]
+lon = float(sensebox_info["longitude"])
+lat = float(sensebox_info["latitude"])
 
 # Calculate sunrise and sunset times with timezone adjustment
 city = LocationInfo(
@@ -226,7 +223,7 @@ def create_sensebox_info_card(info):
                                     },
                                 ),
                                 html.Span(
-                                    info["created_at"].strftime("%Y-%m-%d"),
+                                    info["created_at"].strftime("%d.%m.%Y"),
                                     className="card-value",
                                     style={
                                         "display": "block",
@@ -258,7 +255,7 @@ def create_sensebox_info_card(info):
                                 ),
                                 html.Span(
                                     info["last_measurement_at"].strftime(
-                                        "%Y-%m-%d %H:%M:%S"
+                                        "%d.%m.%d %H:%M"
                                     ),
                                     className="card-value",
                                     style={
@@ -320,7 +317,7 @@ def create_sensebox_info_card(info):
 
 def calculate_daily_stats(df):
     stats = []
-    for i in range(6):
+    for i in range(5):
         day = datetime.now() - timedelta(days=i)
         day_str = day.strftime("%Y-%m-%d")
         day_data = df[df["created_at"].dt.strftime("%Y-%m-%d") == day_str]
@@ -491,6 +488,10 @@ aggregation_options = [
     {"label": "Wöchentlich", "value": "W"},
 ]
 
+# Encode the map.svg file
+map_icon_path = os.path.join(SVG_DIR, "map.svg")
+encoded_map_icon = base64.b64encode(open(map_icon_path, "rb").read()).decode("ascii")
+
 app.layout = html.Div(
     style={
         "padding": "5%",
@@ -505,6 +506,41 @@ app.layout = html.Div(
                 "width": "100%",
             },
             children=[
+                dbc.Row(
+                    style={
+                        "display": "flex",
+                        "justifyContent": "flex-start",
+                        "alignItems": "center",
+                        "marginBottom": "20px",
+                    },
+                    children=[
+                        dbc.Col(
+                            html.H1(
+                                "Umweltmonitoring für Karlsruhe",
+                                style={
+                                    "textAlign": "left",
+                                    "fontSize": "60px",
+                                    "color": "#50ae48",
+                                },
+                            ),
+                            width="auto",
+                        ),
+                        dbc.Col(
+                            html.Img(
+                                id="open-modal",
+                                src="data:image/svg+xml;base64,{}".format(
+                                    encoded_map_icon
+                                ),
+                                style={
+                                    "height": "40px",
+                                    "width": "40px",
+                                    "cursor": "pointer",
+                                },
+                            ),
+                            width="auto",  # Automatic width adjustment
+                        ),
+                    ],
+                ),
                 dbc.Row(
                     style={"display": "flex", "justifyContent": "center"},
                     children=[
@@ -559,6 +595,31 @@ app.layout = html.Div(
                         "box-shadow": "rgba(0, 0, 0, 0.1) 0px 5px 15px 0px",
                     },
                 ),
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(
+                            dbc.ModalTitle("Karte"),
+                            style={"background-color": "#e7e9f5"},
+                        ),
+                        dbc.ModalBody(
+                            dcc.Graph(id="choropleth-map", style={"height": "70vh"}),
+                            style={"background-color": "#e7e9f5", "padding": "0px"},
+                        ),
+                        dbc.ModalFooter(
+                            dbc.Button(
+                                "Close",
+                                id="close-modal",
+                                className="ml-auto",
+                                style={"background-color": "#50ae48"},
+                            ),
+                            style={
+                                "background-color": "#e7e9f5",
+                            },
+                        ),
+                    ],
+                    id="modal",
+                    size="lg",
+                ),
             ],
         ),
     ],
@@ -602,6 +663,59 @@ def update_line_plot(sensor, aggregation):
         y=df_agg.columns[1:],
         title=f"{sensor} über die Zeit ({aggregation})",
     ).update_layout(
+        paper_bgcolor="#e7e9f5",
+    )
+
+    return fig
+
+
+@app.callback(
+    Output("modal", "is_open"),
+    [Input("open-modal", "n_clicks"), Input("close-modal", "n_clicks")],
+    [State("modal", "is_open")],
+)
+def toggle_modal(n1, n2, is_open):
+    if n1 or n2:
+        return not is_open
+    return is_open
+
+
+@app.callback(Output("choropleth-map", "figure"), Input("open-modal", "n_clicks"))
+def display_choropleth_map(n_clicks):
+    if n_clicks is None:
+        return {}
+
+    # Create a sample choropleth map using plotly express
+    df_sample = pd.DataFrame(
+        {
+            "lat": [lat, lat + 0.01, lat - 0.01],
+            "lon": [lon, lon + 0.01, lon - 0.01],
+            "value": [10, 20, 30],
+        }
+    )
+
+    fig = px.choropleth_mapbox(
+        df_sample,
+        geojson=None,
+        locations="value",
+        color="value",
+        mapbox_style="carto-positron",
+        center={"lat": lat, "lon": lon},
+        zoom=12,
+        opacity=0.5,
+    )
+
+    # Add a marker for the Sensebox location
+    fig.add_scattermapbox(
+        lat=[lat],
+        lon=[lon],
+        mode="markers",
+        marker=dict(size=14, color="red"),
+        text=["Sensebox Location"],
+        name="Sensebox",
+    )
+
+    fig.update_layout(
         paper_bgcolor="#e7e9f5",
     )
 
