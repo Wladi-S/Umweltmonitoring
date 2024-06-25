@@ -3,8 +3,7 @@ import pandas as pd
 import io
 import psycopg2
 from psycopg2 import sql
-from time import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # Datenbank-Verbindungsdetails
 DB_DETAILS = {
@@ -210,12 +209,14 @@ def update_data():
     cur = conn.cursor()
 
     # Aktuelles Datum und Uhrzeit in ISO 8601 Format mit Zulu-Zeit
-    end_date = (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="milliseconds")
-        .replace("+00:00", "Z")
-    )
-
+    # end_date = (
+    #     datetime.now(timezone.utc)
+    #     .isoformat(timespec="milliseconds")
+    #     .replace("+00:00", "Z")
+    # )
+    end_date = (datetime.now() - timedelta(hours=2)).isoformat(
+        timespec="milliseconds"
+    ).replace("+00:00", "Z") + "Z"
     sensor_titles_and_ids = get_sensor_titles_and_ids("6252afcfd7e732001bb6b9f7")
 
     print(f"Sensor Informationen werden abgerufen..")
@@ -227,11 +228,10 @@ def update_data():
         else:
             # Konvertiere start_date ins gewünschte Format
             start_date = (
-                start_date.replace(tzinfo=timezone.utc)
+                (start_date - timedelta(hours=2))
                 .isoformat(timespec="milliseconds")
                 .replace("+00:00", "Z")
-            )
-
+            ) + "Z"
         csv_data = fetch_sensor_data(
             "6252afcfd7e732001bb6b9f7", sensor.get("title"), start_date, end_date
         )
@@ -239,18 +239,8 @@ def update_data():
             df = pd.read_csv(io.StringIO(csv_data), usecols=["value", "createdAt"])
             df = df.rename(columns={"value": sensor.get("title")})
             df["createdAt"] = pd.to_datetime(df["createdAt"])
-            if df["createdAt"].dt.tz is None:
-                df["createdAt"] = df["createdAt"].dt.tz_localize("UTC", ambiguous="NaT")
-            df["createdAt"] = df["createdAt"].dt.tz_convert("Europe/Berlin")
-            df["createdAt"] = (
-                df["createdAt"]
-                .dt.tz_localize(None)
-                .dt.tz_localize("Europe/Berlin", ambiguous="NaT")
-            )
-            df = df.dropna(subset=["createdAt"])
             df["createdAt"] = df["createdAt"].dt.floor("min")
             df.sort_values("createdAt", inplace=True)
-
             insert_measurement_data(cur, sensor, df)
             print(
                 f"Alle Daten ab dem {start_date.replace('T', ' ').split('.')[0]} für Sensor {sensor.get('title')} wurden erfolgreich in die Datenbank eingefügt."
