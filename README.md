@@ -3,7 +3,7 @@
 ## Umweltmonitoring Dashboard
 
 ### Projektbeschreibung
-Dieses Projekt umfasst die Entwicklung einer zweckmäßigen und echtzeitfähigen Dashboard-Anwendung zur Überwachung und Vorhersage von Umweltdaten, die von einer senseBox gesammelt werden. Das Dashboard stellt diese Daten visuell dar und verwendet maschinelles Lernen, um Vorhersagen für bestimmte Messvariablen zu treffen. Die Anwendung wurde mit den folgenden Hauptkomponenten entwickelt:
+Dieses Projekt wurde entwickelt, um ein Dashboard zur Überwachung und Vorhersage von Umweltdaten bereitzustellen. Ziel ist es, Daten, die von einer senseBox gesammelt werden, in Echtzeit zu visualisieren und mithilfe von maschinellem Lernen Vorhersagen für bestimmte Messvariablen zu treffen. Das Dashboard soll dabei helfen, Umweltbedingungen zu überwachen, historische Trends zu analysieren und zukünftige Entwicklungen vorherzusagen. Die Anwendung wurde mit den folgenden Hauptkomponenten entwickelt:
 - **Datenquelle:** openSenseMap
 - **Datenhaltung:** PostgreSQL
 - **Darstellung:** Plotly & Dash
