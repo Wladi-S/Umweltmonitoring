@@ -188,7 +188,7 @@ def update_last_measurement_at(cur):
     WHERE sensebox.sensebox_id = subquery.sensebox_id;
     """
     cur.execute(update_query)
-    print("Last measurement dates updated.")
+    # print("Last measurement dates updated.")
 
 
 # Funktion zum Abrufen des letzten Messdatums eines Sensors
@@ -218,8 +218,8 @@ def update_data():
         timespec="milliseconds"
     ).replace("+00:00", "Z") + "Z"
     sensor_titles_and_ids = get_sensor_titles_and_ids("6252afcfd7e732001bb6b9f7")
-
-    print(f"Sensor Informationen werden abgerufen..")
+    now = datetime.now()
+    # print(f"Sensor Informationen werden abgerufen.. {now}")
 
     for sensor in sensor_titles_and_ids:
         start_date = get_last_measurement_date(cur, sensor.get("id"))
@@ -242,9 +242,7 @@ def update_data():
             df["createdAt"] = df["createdAt"].dt.floor("min")
             df.sort_values("createdAt", inplace=True)
             insert_measurement_data(cur, sensor, df)
-            print(
-                f"Alle Daten ab dem {start_date.replace('T', ' ').split('.')[0]} für Sensor {sensor.get('title')} wurden erfolgreich in die Datenbank eingefügt."
-            )
+            # print(f"Alle Daten ab dem {start_date.replace('T', ' ').split('.')[0]} für Sensor {sensor.get('title')} wurden erfolgreich in die Datenbank eingefügt.")
     update_last_measurement_at(cur)
     cur.close()
     conn.close()
