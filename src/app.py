@@ -654,7 +654,7 @@ def update_forecast_components(n_intervals):
         forecast_df.iloc[1:],  # Skip the first value for the line plot
         x="ds",
         y="y",
-        title="Temperatur Vorhersage (nächsten 24 Stunden)",
+        title="Temperatur Vorhersage (nächsten Stunden)",
         markers=True,
     ).update_layout(
         paper_bgcolor="#e7e9f5",
