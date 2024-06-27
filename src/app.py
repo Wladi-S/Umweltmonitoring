@@ -13,24 +13,29 @@ from astral.sun import sun
 import pytz
 from neuralprophet import NeuralProphet
 import shutil
-
 import warnings
+import threading
+from initialize import update_data
+from scheduler import start_scheduler
+from utils import fetch_and_prepare_data, train_and_predict, train_and_update_forecast
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
+# Get the directory of the current script
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Set the path to the SVG icons directory relative to the app.py location
-SVG_DIR = os.path.join("..", "svg")
+# Set the path to the SVG icons directory relative to the current script location
+SVG_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", "svg"))
 
 # Initialize the Dash app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
+# Initialize the global forecast_df
+forecast_df = pd.DataFrame()
 
-# Helper functions
-def fetch_and_prepare_data():
-    df_pivot = fetch_and_pivot_sensor_data()
-    return df_pivot
+# Initialize the global aggregated_df
+aggregated_df = pd.DataFrame()
 
 
 def get_last_valid_value(df, column):
@@ -38,7 +43,11 @@ def get_last_valid_value(df, column):
 
 
 def load_svg_icon(filename):
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    SVG_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", "svg"))
     icon_path = os.path.join(SVG_DIR, filename)
+    if not os.path.exists(icon_path):
+        raise FileNotFoundError(f"No such file or directory: '{icon_path}'")
     return base64.b64encode(open(icon_path, "rb").read()).decode("ascii")
 
 
@@ -225,7 +234,7 @@ def create_info_row(title, value):
 
 def calculate_daily_stats(df):
     stats = []
-    for i in range(5):
+    for i in range(1, 6):
         day = datetime.now() - timedelta(days=i)
         day_str = day.strftime("%Y-%m-%d")
         day_data = df[df["created_at"].dt.strftime("%Y-%m-%d") == day_str]
@@ -367,31 +376,7 @@ sensebox_info = fetch_sensebox_info().iloc[0]
 lon, lat = float(sensebox_info["longitude"]), float(sensebox_info["latitude"])
 sunrise_time, sunset_time = calculate_sun_times(lat, lon)
 
-
-# Train NeuralProphet model and make predictions
-def train_and_predict(df):
-
-    hourly_forecast = df[["created_at", "Temperature in °C"]].dropna()
-    hourly_forecast.set_index("created_at", inplace=True)
-    hourly_forecast["Temperature in °C"] = hourly_forecast["Temperature in °C"].astype(
-        float
-    )
-    hourly_forecast = hourly_forecast.resample("h").max().dropna()
-    hourly_forecast.reset_index(inplace=True)
-    hourly_forecast.columns = ["ds", "y"]
-    hourly_forecast = hourly_forecast[:-1]
-
-    m = NeuralProphet()
-    model = m.fit(hourly_forecast, freq="h", epochs=10)
-
-    future = m.make_future_dataframe(hourly_forecast, periods=6)
-    forecast = m.predict(future)
-    forecast = forecast[["ds", "yhat1"]]
-    forecast.columns = ["ds", "y"]
-    shutil.rmtree("lightning_logs", ignore_errors=True)
-    return pd.concat([hourly_forecast[-3:], forecast])
-
-
+# Initialize the forecast_df at the start
 forecast_df = train_and_predict(df)
 
 
@@ -449,7 +434,8 @@ def create_forecast_row(forecast_df):
                     forecast_df.iloc[i]["ds"].strftime("%H:%M"),
                     round(forecast_df.iloc[i]["y"], 1),
                     icon_filename,
-                )
+                ),
+                # width=1,  # Specify the width of each column
             )
         )
     return dbc.Row(forecast_cards)
@@ -479,9 +465,10 @@ aggregation_options = [
     ]
 ]
 
-# Encode the map.svg file
-map_icon_path = os.path.join(SVG_DIR, "map.svg")
-encoded_map_icon = load_svg_icon("map.svg")
+try:
+    encoded_map_icon = load_svg_icon("map.svg")
+except FileNotFoundError as e:
+    print(e)  # Print the error to see the problematic path
 
 # Define the layout of the app
 app.layout = html.Div(
@@ -492,6 +479,11 @@ app.layout = html.Div(
         "background-color": "#f5f5f5",
     },
     children=[
+        dcc.Interval(
+            id="interval-component",
+            interval=60 * 1000,  # in milliseconds
+            n_intervals=0,
+        ),
         html.Div(
             style={"maxWidth": "100%", "width": "100%"},
             children=[
@@ -535,9 +527,10 @@ app.layout = html.Div(
                             create_sensebox_info_card(
                                 sensebox_info, sunrise_time, sunset_time
                             ),
+                            id="sensebox-info-card",
                             width=3,
                         ),
-                        dbc.Col(create_main_content(df), width=9),
+                        dbc.Col(create_main_content(df), id="main-content", width=9),
                     ],
                 ),
                 dbc.Card(
@@ -551,7 +544,9 @@ app.layout = html.Div(
                                     "margin-bottom": "20px",
                                 },
                             ),
-                            create_forecast_row(forecast_df),
+                            html.Div(
+                                id="forecast-row"
+                            ),  # Change to Div to avoid nested rows
                             dbc.Row(dbc.Col(dcc.Graph(id="forecast-line-plot"))),
                         ],
                     ),
@@ -629,6 +624,53 @@ app.layout = html.Div(
 
 
 @app.callback(
+    [Output("sensebox-info-card", "children"), Output("main-content", "children")],
+    [Input("interval-component", "n_intervals")],
+)
+def update_dashboard(n_intervals):
+    # Fetch updated data
+    df = fetch_and_prepare_data()
+    sensebox_info = fetch_sensebox_info().iloc[0]
+    lon, lat = float(sensebox_info["longitude"]), float(sensebox_info["latitude"])
+    sunrise_time, sunset_time = calculate_sun_times(lat, lon)
+
+    # Create updated components
+    sensebox_info_card = create_sensebox_info_card(
+        sensebox_info, sunrise_time, sunset_time
+    )
+    main_content = create_main_content(df)
+
+    return sensebox_info_card, main_content
+
+
+@app.callback(
+    [Output("forecast-line-plot", "figure"), Output("forecast-row", "children")],
+    [Input("interval-component", "n_intervals")],
+)
+def update_forecast_components(n_intervals):
+    global forecast_df
+
+    fig = px.line(
+        forecast_df.iloc[1:],  # Skip the first value for the line plot
+        x="ds",
+        y="y",
+        title="Temperatur Vorhersage (nächsten 24 Stunden)",
+        markers=True,
+    ).update_layout(
+        paper_bgcolor="#e7e9f5",
+        plot_bgcolor="#e7e9f5",
+        xaxis_title="Datum",
+        yaxis_title="Temperatur",
+    )
+
+    fig.update_traces(line=dict(color="#50ae48"))
+
+    forecast_row = create_forecast_row(forecast_df)
+
+    return fig, forecast_row
+
+
+@app.callback(
     Output("line-plot", "figure"),
     Input("sensor-dropdown", "value"),
     Input("aggregation-dropdown", "value"),
@@ -672,29 +714,6 @@ def update_line_plot(sensor, aggregation):
     for trace in fig.data:
         trace_name = trace.name.split("_")[1]
         trace.line.color = colors.get(trace_name, "black")
-
-    return fig
-
-
-@app.callback(Output("forecast-line-plot", "figure"), Input("forecast-line-plot", "id"))
-def update_forecast_line_plot(_):
-    # Skip the first value for the line plot
-    forecast_df_plot = forecast_df.iloc[1:]
-
-    fig = px.line(
-        forecast_df_plot,
-        x="ds",
-        y="y",
-        title="Temperatur Vorhersage (nächste 6 Stunden)",
-        markers=True,
-    ).update_layout(
-        paper_bgcolor="#e7e9f5",
-        plot_bgcolor="#e7e9f5",
-        xaxis_title="Datum",
-        yaxis_title="Temperatur",
-    )
-
-    fig.update_traces(line=dict(color="#50ae48"))
 
     return fig
 
@@ -747,4 +766,11 @@ def display_choropleth_map(n_clicks):
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+
+    scheduler_thread = threading.Thread(target=start_scheduler)
+    scheduler_thread.start()
+
+    update_data()  # Erstes Daten-Update beim Start
+    train_and_update_forecast()  # Erstes Modelltraining beim Start
+
+    app.run_server(debug=False)
